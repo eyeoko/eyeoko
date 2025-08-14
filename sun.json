@@ -211,12 +211,12 @@
     {
       "type": "trojan",
       "tag": "trojan-out",
-      "server": "199.180.115.155",
-      "server_port": 9443,
-      "password": "5iFHKMrn9Ez//VKh6zChTA==",
+      "server": "7.8046921.xyz",
+      "server_port": 443,
+      "password": "331a9f4b-7860-41e6-8e52-5ff5676130b2",
       "tls": {
         "enabled": true,
-        "server_name": "www.example.com",
+        "server_name": "7.8046921.xyz",
         "insecure": true,
         "utls": {
           "fingerprint": "chrome"
