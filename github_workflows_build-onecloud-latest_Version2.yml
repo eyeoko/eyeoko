@@ -1,0 +1,231 @@
+name: Build Latest Stable OpenWrt Onecloud
+
+permissions:
+  contents: write
+  actions: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      SETIP:
+        description: 'Set ip address'
+        default: '192.168.66.1'
+        required: false
+        type: choice
+        options:
+        - '192.168.66.1'
+        - '192.168.8.1'
+        - '192.168.88.1'
+        - '192.168.10.1'
+        - '192.168.22.1'
+        - '192.168.16.1'
+        - '192.168.19.1'
+        - '192.168.9.1'
+        - '192.168.166.1'
+        - '172.16.0.1'
+        - '172.18.0.1'
+        - '10.0.0.1'
+        - '10.88.0.1'
+      ALLKMOD:
+        description: 'Compile All Kmods'
+        required: true
+        default: 'true'
+        type: choice
+        options:
+        - 'true'
+        - 'false'
+      TEST-KERNEL:
+        description: 'Use kernel 6.1'
+        default: 'false'
+        type: choice
+        options:
+        - 'true'
+        - 'false'
+      UPLOAD_RELEASE:
+        description: 'Upload to Release'
+        required: true
+        default: 'true'
+        type: choice
+        options:
+        - 'true'
+        - 'false'
+      UPLOAD_FIRMWARE:
+        description: 'Upload Firmware'
+        required: true
+        default: 'true'
+        type: choice
+        options:
+        - 'true'
+        - 'false'
+      UPLOAD_IPK_DIR:
+        description: 'Upload IPK Dir'
+        required: true
+        default: 'false'
+        type: choice
+        options:
+        - 'true'
+        - 'false'
+      UPLOAD_COWTRANSFER:
+        description: 'Upload CowTransfer'
+        required: true
+        default: 'false'
+        type: choice
+        options:
+        - 'true'
+        - 'false'
+      UPLOAD_WETRANSFER:
+        description: 'Upload WeTransfer'
+        required: true
+        default: 'false'
+        type: choice
+        options:
+        - 'true'
+        - 'false'
+      Cache:
+        description: 'Use Cache'
+        required: true
+        default: 'true'
+        type: choice
+        options:
+        - 'true'
+        - 'false'
+
+env:
+  TZ: Asia/Shanghai
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    name: Build onecloud latest stable openwrt
+
+    steps:
+    - name: Checkout workflow files
+      uses: actions/checkout@main
+
+    - name: Free up disk space
+      uses: endersonmenezes/free-disk-space@v2
+      with:
+        remove_android: true
+        remove_dotnet: true
+        remove_haskell: true
+        remove_tool_cache: true
+        remove_swap: true
+        remove_packages: "azure-cli google-cloud-cli microsoft-edge-stable google-chrome-stable firefox postgresql* temurin-* *llvm* mysql* dotnet-sdk-*"
+        remove_packages_one_command: true
+        remove_folders: "/usr/share/swift /usr/share/miniconda /usr/share/az* /usr/share/glade* /usr/local/lib/node_modules /usr/local/share/chromium /usr/local/share/powershell"
+        testing: false
+
+    - name: Setup build environment
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc
+        sudo apt-get -qq update
+        sudo apt-get -qq install build-essential clang flex g++ gawk gcc-multilib gettext \
+        git libncurses5-dev libssl-dev python3-distutils python3-pyelftools python3-setuptools \
+        libpython3-dev rsync unzip zlib1g-dev swig aria2 jq subversion qemu-utils ccache rename \
+        libelf-dev device-tree-compiler libgnutls28-dev coccinelle libgmp3-dev libmpc-dev libfuse-dev b43-fwcutter cups-ppdc
+        sudo apt-get -qq purge azure-cli ghc* zulu* llvm* firefox powershell openjdk* dotnet* google* mysql* php* android*
+        sudo apt-get -qq autoremove --purge
+        sudo apt-get -qq clean
+        sudo timedatectl set-timezone "$TZ"
+        sudo mkdir -p /workdir
+        sudo chown $USER:$GROUPS /workdir
+
+    - name: Set Version Info
+      id: env
+      run: |
+        VERSION="$(date +'%Y.%m.%d')"
+        echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+    - name: Clone OpenWrt latest stable source
+      working-directory: /workdir
+      run: |
+        git clone https://git.openwrt.org/openwrt/openwrt.git -b openwrt-23.05 openwrt --single-branch
+        ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
+        cd openwrt
+        sed -i 's|src-git packages https://git.openwrt.org/feed/packages.git.*|src-git packages https://git.openwrt.org/feed/packages.git;openwrt-23.05|g' feeds.conf.default
+        sed -i '$a src-git lunatic7 https://github.com/lunatickochiya/actionbased-openwrt-packages.git' feeds.conf.default
+
+    - name: Download .config from eyeoko/onecloud-openwrt
+      run: |
+        mkdir -p $GITHUB_WORKSPACE/openwrt
+        curl -L https://github.com/eyeoko/onecloud-openwrt/raw/refs/heads/main/.config -o $GITHUB_WORKSPACE/openwrt/.config
+
+    - name: Increase disk space links
+      run: |
+        sudo mkdir -p -m 777 /mnt/openwrt/bin /mnt/openwrt/staging_dir /mnt/openwrt/build_dir
+        ln -sf /mnt/openwrt/bin openwrt/bin
+        ln -sf /mnt/openwrt/staging_dir openwrt/staging_dir
+        ln -sf /mnt/openwrt/build_dir openwrt/build_dir
+        df -hT
+
+    - name: Update & install feeds
+      run: |
+        cd openwrt
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+
+    - name: Make defconfig
+      run: |
+        cd openwrt
+        make defconfig
+
+    - name: Set IP address
+      if: github.event.inputs.SETIP != '192.168.66.1'
+      run: |
+        sed -i "s/192\.168\.66\.1/${{ github.event.inputs.SETIP }}/g" openwrt/package/kochiya/autoset/files/def_uci/zzz-autoset* || true
+
+    - name: Download source packages
+      run: |
+        cd openwrt
+        make download -j$(nproc)
+        find dl -size -1024c -exec rm -f {} \;
+
+    - name: Cache build
+      uses: stupidloud/cachewrtbuild@main
+      if: github.event.inputs.Cache == 'true' && !cancelled()
+      with:
+        ccache: 'true'
+        mixkey: 'onecloud'
+        prefix: ${{ github.workspace }}/openwrt
+
+    - name: Build firmware
+      working-directory: ./openwrt
+      run: |
+        echo -e "$(($(nproc)+1)) thread compile"
+        make -j$(($(nproc)+1)) || make -j1 V=s
+
+    - name: Organize firmware files
+      run: |
+        mkdir -p firmware
+        cp -u -f bin/targets/*/*/*.img firmware/ || true
+        cp -u -f .config firmware/onecloud.config || true
+
+    - name: Upload firmware directory
+      uses: actions/upload-artifact@main
+      if: github.event.inputs.UPLOAD_FIRMWARE == 'true'
+      with:
+        name: ${{ env.VERSION }}_onecloud_firmware
+        path: firmware
+
+    - name: Upload IPK directory
+      uses: actions/upload-artifact@main
+      if: github.event.inputs.UPLOAD_IPK_DIR == 'true'
+      with:
+        name: ${{ env.VERSION }}_onecloud_ipks
+        path: openwrt/bin/packages
+
+    - name: Upload firmware to GitHub Release
+      uses: softprops/action-gh-release@v2
+      if: github.event.inputs.UPLOAD_RELEASE == 'true'
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        files: "firmware/*"
+        name: ${{ env.VERSION }} onecloud-openwrt
+        tag_name: ${{ env.VERSION }}_onecloud-openwrt
+        body: |
+          自动构建 onecloud 最新稳定版 OpenWrt 线刷镜像
+
+    # 其他上传到 CowTransfer/WeTransfer 可按需加上
