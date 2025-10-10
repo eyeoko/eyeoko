@@ -1,0 +1,65 @@
+name: Build Armbian Bookworm for OneCloud with USB WiFi Drivers
+
+on:
+  workflow_dispatch:  # 手动触发
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git wget bc bison flex libncurses5-dev libssl-dev
+
+      - name: Create kernel config patches for USB WiFi drivers
+        run: |
+          mkdir -p userpatches/kernel/config
+          cat > userpatches/kernel/config/usb-wifi.conf << 'EOF'
+# Enable Atheros AR9271 (ath9k_htc) USB WiFi driver
+CONFIG_ATH9K_HTC=m
+
+# Enable Realtek RTL8191SU (r8712u) staging USB WiFi driver
+CONFIG_R8712U=m
+EOF
+          echo "Kernel config patch created: userpatches/kernel/config/usb-wifi.conf"
+
+      - name: Clone Armbian build framework
+        run: |
+          git clone --depth=1 https://github.com/armbian/build
+          cd build
+
+      - name: Build Armbian image
+        run: |
+          cd build
+          # OneCloud specific: BOARD=Onecloud, RELEASE=bookworm, BRANCH=current (6.12.x kernel)
+          # Non-interactive config, minimal build
+          ./compile.sh \
+            BOARD=Onecloud \
+            BRANCH=current \
+            RELEASE=bookworm \
+            KERNEL_ONLY=no \
+            KERNEL_CONFIGURE=no \
+            BUILD_MINIMAL=yes \
+            BUILD_DESKTOP=no \
+            DEB_COMPRESS=xz
+        env:
+          USE_CCACHE: yes
+          CCACHE_SIZE: 2G
+
+      - name: Upload Armbian image artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: armbian-onecloud-image
+          path: build/output/images/Armbian*.img.xz
+          retention-days: 30
+
+      - name: Upload kernel deb packages (for testing drivers)
+        uses: actions/upload-artifact@v4
+        with:
+          name: armbian-kernel-debs
+          path: build/output/debs/*.deb
+          retention-days: 30
